@@ -12,12 +12,19 @@ import {
   ChevronUp, 
   Share2, 
   FileCode,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Palette,
+  Wand2
 } from 'lucide-react';
 import { MermaidViewer, type MermaidViewerRef } from './components/Mermaid';
 import { THEMES, type DiagramTheme } from './themes';
 import { SAMPLES, type DiagramSample } from './samples';
 import { exportSvg, exportPng, copyPngToClipboard, copySvgToClipboard } from './utils/exportUtils';
+import { 
+  MINDFUL_PALETTES, 
+  generateMindfulClassDefs, 
+  type MindfulStrategy 
+} from './utils/mindfulColoring';
 
 export default function App() {
   const [code, setCode] = useState<string>(SAMPLES[0].code);
@@ -28,7 +35,12 @@ export default function App() {
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [showExportMenu, setShowExportMenu] = useState<boolean>(false);
   const [showSamplesMenu, setShowSamplesMenu] = useState<boolean>(false);
+  const [showMindfulMenu, setShowMindfulMenu] = useState<boolean>(false);
   const [zoomScale, setZoomScale] = useState<number>(1);
+
+  // Mindful Color Coding state
+  const [mindfulEnabled, setMindfulEnabled] = useState<boolean>(true);
+  const [mindfulStrategy, setMindfulStrategy] = useState<MindfulStrategy>('semantic');
 
   const viewerRef = useRef<MermaidViewerRef>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -58,7 +70,6 @@ export default function App() {
       if (text && text.trim()) {
         setCode(text);
         showNotification('Successfully pasted diagram from clipboard! ✨');
-        // Fit to screen after pasting new diagram
         setTimeout(() => {
           viewerRef.current?.fitToScreen();
         }, 300);
@@ -66,7 +77,6 @@ export default function App() {
         showNotification('Clipboard is empty or contains no text');
       }
     } catch {
-      // Browser permissions prompt fallback
       textareaRef.current?.focus();
       textareaRef.current?.select();
       showNotification('Press Ctrl+V (or Cmd+V) to paste directly into the box');
@@ -94,6 +104,20 @@ export default function App() {
     }
     await navigator.clipboard.writeText(code);
     showNotification('Mermaid code copied to clipboard! 📋');
+  };
+
+  const handleInjectMindfulStyles = () => {
+    if (!code.trim()) {
+      showNotification('Editor is empty');
+      return;
+    }
+    const defs = generateMindfulClassDefs(selectedTheme.isDark);
+    if (code.includes('%% Mindful Architecture Color Hierarchy')) {
+      showNotification('Mindful styles are already in your code!');
+      return;
+    }
+    setCode((prev) => prev.trim() + '\n' + defs);
+    showNotification('Injected portable classDef styles into your Mermaid code! 🎨');
   };
 
   const handleExportSvg = () => {
@@ -168,6 +192,7 @@ export default function App() {
   };
 
   const diagramTag = getDiagramTag();
+  const currentStrategyInfo = MINDFUL_PALETTES[mindfulStrategy] || MINDFUL_PALETTES.semantic;
 
   return (
     <div className={`app-shell theme-${selectedTheme.id}`}>
@@ -188,23 +213,76 @@ export default function App() {
           )}
         </div>
 
-        {/* Theme Pills */}
-        <div className="theme-selector-group">
-          <span className="theme-group-label">Palette:</span>
-          {THEMES.map((theme) => (
+        {/* Mindful Color Strategy Selector */}
+        <div className="topbar-center-tools">
+          <div className="relative-menu">
             <button
-              key={theme.id}
-              className={`theme-chip-btn ${selectedTheme.id === theme.id ? 'active' : ''}`}
-              style={{
-                borderColor: selectedTheme.id === theme.id ? theme.accentColor : 'transparent',
-              }}
-              onClick={() => setSelectedTheme(theme)}
-              title={theme.name}
+              className={`action-btn mindful-toggle-btn ${mindfulEnabled ? 'active' : ''}`}
+              onClick={() => setShowMindfulMenu(!showMindfulMenu)}
+              title="Mindful Color Coding Strategy"
             >
-              <span className="theme-color-dot" style={{ backgroundColor: theme.accentColor }} />
-              <span className="theme-chip-text">{theme.name.split(' ')[0]}</span>
+              <Palette size={15} style={{ color: mindfulEnabled ? '#38bdf8' : 'currentColor' }} />
+              <span>Mindful Colors: {mindfulEnabled ? currentStrategyInfo.name.split(' ')[0] : 'Off'}</span>
+              <ChevronDown size={14} />
             </button>
-          ))}
+
+            {showMindfulMenu && (
+              <div className="dropdown-flyout mindful-dropdown">
+                <div className="dropdown-header">🎯 Mindful Color Coding</div>
+                <div className="dropdown-toggle-row">
+                  <span>Enable Auto-Color Hierarchy</span>
+                  <input
+                    type="checkbox"
+                    checked={mindfulEnabled}
+                    onChange={(e) => setMindfulEnabled(e.target.checked)}
+                  />
+                </div>
+                <div className="dropdown-divider" />
+                <div className="dropdown-subtitle">Hierarchy Strategies</div>
+                {(Object.keys(MINDFUL_PALETTES) as MindfulStrategy[]).map((stratKey) => (
+                  <button
+                    key={stratKey}
+                    className={`dropdown-item ${mindfulStrategy === stratKey ? 'selected' : ''}`}
+                    onClick={() => {
+                      setMindfulStrategy(stratKey);
+                      setMindfulEnabled(true);
+                      setShowMindfulMenu(false);
+                      showNotification(`Switched to ${MINDFUL_PALETTES[stratKey].name}! 🎯`);
+                    }}
+                  >
+                    <div>
+                      <div className="dropdown-item-title">{MINDFUL_PALETTES[stratKey].name}</div>
+                      <div className="dropdown-item-desc">
+                        {stratKey === 'semantic' && 'Client, Gateway, Services, Storage & Queues'}
+                        {stratKey === 'clusters' && 'Distinct harmonious hue per subgraph tier'}
+                        {stratKey === 'progression' && 'Sequential gradient along execution flow'}
+                        {stratKey === 'accessible' && 'W3C Okabe-Ito colorblind-safe palette'}
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Canvas Theme Selector */}
+          <div className="theme-selector-group">
+            <span className="theme-group-label">Canvas:</span>
+            {THEMES.map((theme) => (
+              <button
+                key={theme.id}
+                className={`theme-chip-btn ${selectedTheme.id === theme.id ? 'active' : ''}`}
+                style={{
+                  borderColor: selectedTheme.id === theme.id ? theme.accentColor : 'transparent',
+                }}
+                onClick={() => setSelectedTheme(theme)}
+                title={theme.name}
+              >
+                <span className="theme-color-dot" style={{ backgroundColor: theme.accentColor }} />
+                <span className="theme-chip-text">{theme.name.split(' ')[0]}</span>
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Export & Utility Actions */}
@@ -275,7 +353,7 @@ export default function App() {
                   <Copy size={16} />
                   <div>
                     <div className="dropdown-item-title">Copy Image to Clipboard</div>
-                    <div className="dropdown-item-desc">Paste directly into apps</div>
+                    <div className="dropdown-item-desc">Paste directly into Slack/Docs</div>
                   </div>
                 </button>
                 <button className="dropdown-item" onClick={handleCopySvg}>
@@ -301,14 +379,20 @@ export default function App() {
       </header>
 
       {/* Main Full-Viewport Viewer Canvas */}
-      <main className="viewer-main-canvas" onClick={() => {
-        if (showExportMenu) setShowExportMenu(false);
-        if (showSamplesMenu) setShowSamplesMenu(false);
-      }}>
+      <main 
+        className="viewer-main-canvas" 
+        onClick={() => {
+          if (showExportMenu) setShowExportMenu(false);
+          if (showSamplesMenu) setShowSamplesMenu(false);
+          if (showMindfulMenu) setShowMindfulMenu(false);
+        }}
+      >
         <MermaidViewer
           ref={viewerRef}
           code={code}
           theme={selectedTheme}
+          mindfulEnabled={mindfulEnabled}
+          mindfulStrategy={mindfulStrategy}
           onScaleChange={setZoomScale}
         />
       </main>
@@ -325,6 +409,15 @@ export default function App() {
             >
               <ClipboardPaste size={17} />
               <span>Paste from Clipboard</span>
+            </button>
+
+            <button
+              className="drawer-mini-btn"
+              onClick={handleInjectMindfulStyles}
+              title="Inject portable classDef colors directly into Mermaid syntax"
+            >
+              <Wand2 size={14} style={{ color: '#ec4899' }} />
+              <span>Embed Colors in Code</span>
             </button>
 
             <button

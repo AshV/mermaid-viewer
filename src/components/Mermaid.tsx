@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import mermaid from 'mermaid';
-import { AlertCircle, ZoomIn, ZoomOut, Maximize, RotateCcw, Move, Sparkles } from 'lucide-react';
+import { AlertCircle, ZoomIn, ZoomOut, Maximize, RotateCcw, Move, Sparkles, Layers, Eye } from 'lucide-react';
 import type { DiagramTheme } from '../themes';
+import { 
+  applyMindfulColorsToSvg, 
+  highlightCategory, 
+  MINDFUL_PALETTES, 
+  type MindfulStrategy 
+} from '../utils/mindfulColoring';
 
 export interface MermaidViewerRef {
   getSvgElement: () => SVGElement | null;
@@ -12,12 +18,21 @@ export interface MermaidViewerRef {
 interface MermaidProps {
   code: string;
   theme: DiagramTheme;
+  mindfulEnabled?: boolean;
+  mindfulStrategy?: MindfulStrategy;
   onError?: (error: string | null) => void;
   onScaleChange?: (scale: number) => void;
 }
 
 export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
-  ({ code, theme, onError, onScaleChange }, ref) => {
+  ({ 
+    code, 
+    theme, 
+    mindfulEnabled = true, 
+    mindfulStrategy = 'semantic', 
+    onError, 
+    onScaleChange 
+  }, ref) => {
     const containerRef = useRef<HTMLDivElement>(null);
     const wrapperRef = useRef<HTMLDivElement>(null);
     const [svgCode, setSvgCode] = useState<string>('');
@@ -26,6 +41,8 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
     const [isDragging, setIsDragging] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [hoveredCategory, setHoveredCategory] = useState<string | null>(null);
+    const [showLegend, setShowLegend] = useState<boolean>(true);
 
     const dragStartRef = useRef({ x: 0, y: 0 });
     const initialPanRef = useRef({ x: 0, y: 0 });
@@ -46,20 +63,15 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
       onScaleChange?.(scale);
     }, [scale, onScaleChange]);
 
-    // Initialize mermaid when theme changes
-    useEffect(() => {
-      try {
-        mermaid.initialize({
-          startOnLoad: false,
-          securityLevel: 'loose',
-          fontFamily: 'Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif',
-          theme: theme.mermaidTheme,
-          themeVariables: theme.themeVariables,
-        });
-      } catch (e) {
-        console.error('Mermaid initialization error:', e);
+    // Apply mindful color coding to the rendered SVG
+    const applyMindfulStyling = useCallback(() => {
+      const svgEl = containerRef.current?.querySelector('svg');
+      if (!svgEl) return;
+
+      if (mindfulEnabled) {
+        applyMindfulColorsToSvg(svgEl, mindfulStrategy, theme.isDark);
       }
-    }, [theme]);
+    }, [mindfulEnabled, mindfulStrategy, theme.isDark]);
 
     // Render diagram
     useEffect(() => {
@@ -77,7 +89,6 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
         const renderId = 'mermaid-chart-' + Math.random().toString(36).substring(2, 9);
 
         try {
-          // Re-init with current theme variables to ensure freshness
           mermaid.initialize({
             startOnLoad: false,
             securityLevel: 'loose',
@@ -94,7 +105,6 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
           }
         } catch (error: any) {
           if (isMounted) {
-            // Remove any phantom elements created by mermaid on error
             const badEl = document.getElementById(renderId);
             if (badEl) badEl.remove();
             const dBadEl = document.getElementById('d' + renderId);
@@ -116,6 +126,19 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
       };
     }, [code, theme, onError]);
 
+    // Post-process SVG whenever svgCode, mindfulEnabled, or mindfulStrategy changes
+    useEffect(() => {
+      if (svgCode) {
+        applyMindfulStyling();
+      }
+    }, [svgCode, applyMindfulStyling]);
+
+    // Interactive Legend Hover Highlight
+    useEffect(() => {
+      const svgEl = containerRef.current?.querySelector('svg');
+      highlightCategory(svgEl || null, hoveredCategory);
+    }, [hoveredCategory]);
+
     // Fit diagram nicely into canvas
     const handleFitToScreen = () => {
       const svg = containerRef.current?.querySelector('svg');
@@ -127,11 +150,10 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
 
       if (svgBBox.width === 0 || svgBBox.height === 0) return;
 
-      // Unscaled dimensions
       const naturalWidth = svgBBox.width / scale;
       const naturalHeight = svgBBox.height / scale;
 
-      const padding = 120;
+      const padding = 130;
       const targetW = Math.max(wrapperBBox.width - padding, 200);
       const targetH = Math.max(wrapperBBox.height - padding, 200);
 
@@ -152,7 +174,6 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
 
     // Mouse drag handlers for panning
     const handleMouseDown = (e: React.MouseEvent) => {
-      // Allow only primary left button
       if (e.button !== 0) return;
       setIsDragging(true);
       dragStartRef.current = { x: e.clientX, y: e.clientY };
@@ -173,11 +194,12 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
 
     // Mouse wheel zoom
     const handleWheel = (e: React.WheelEvent) => {
-      // Zoom centered on canvas
       e.preventDefault();
       const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
       setScale((s) => Math.min(Math.max(Number((s * zoomFactor).toFixed(2)), 0.15), 5));
     };
+
+    const activePalette = MINDFUL_PALETTES[mindfulStrategy] || MINDFUL_PALETTES.semantic;
 
     return (
       <div
@@ -213,7 +235,7 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
           </div>
         )}
 
-        {/* Diagram SVG container with smooth pan and zoom */}
+        {/* Diagram SVG container */}
         <div
           ref={containerRef}
           className="mermaid-render-box"
@@ -224,6 +246,54 @@ export const MermaidViewer = forwardRef<MermaidViewerRef, MermaidProps>(
           }}
           dangerouslySetInnerHTML={{ __html: svgCode }}
         />
+
+        {/* Interactive Mindful Color Legend (Guides the user through colors) */}
+        {mindfulEnabled && code.trim() && (
+          <div 
+            className={`mindful-legend-panel ${showLegend ? 'open' : 'minimized'}`}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="legend-header" onClick={() => setShowLegend(!showLegend)}>
+              <div className="legend-title">
+                <Layers size={14} className="legend-icon" />
+                <span>Mindful Guide: {activePalette.name}</span>
+              </div>
+              <span className="legend-toggle-pill">
+                {showLegend ? 'Hide' : 'Show Legend'}
+              </span>
+            </div>
+
+            {showLegend && (
+              <div className="legend-items-list">
+                <div className="legend-hint">
+                  <Eye size={12} />
+                  <span>Hover to isolate & follow flow</span>
+                </div>
+                {activePalette.categories.map((cat) => (
+                  <div
+                    key={cat.id}
+                    className={`legend-item ${hoveredCategory === cat.id ? 'active' : ''}`}
+                    onMouseEnter={() => setHoveredCategory(cat.id)}
+                    onMouseLeave={() => setHoveredCategory(null)}
+                    title={cat.description}
+                  >
+                    <span
+                      className="legend-color-dot"
+                      style={{
+                        backgroundColor: cat.color,
+                        boxShadow: `0 0 8px ${cat.color}80`,
+                      }}
+                    />
+                    <div className="legend-item-info">
+                      <span className="legend-item-label">{cat.label}</span>
+                      <span className="legend-item-desc">{cat.description}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Syntax Error Overlay */}
         {errorMsg && (
